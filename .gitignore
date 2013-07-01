@@ -1,2 +1,30 @@
+
 /Debug
 /Release
+# Compiled Object files
+*.slo
+*.lo
+*.o
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+
+*.dll
+*.exe
+*.tlog
+*.ilk
+*.pdb
+*.ipch
+*.sdf
+*.suo
+*.obj
+*.idb
+*.log
+*.pch
+*.lastbuildstate
