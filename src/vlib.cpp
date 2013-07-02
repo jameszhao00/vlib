@@ -480,6 +480,11 @@ Camera move_camera_using_keyboard(GLFWwindow* window, const Camera& p_camera, do
     } else if (glfwGetKey(window, 'D') == GLFW_PRESS) {
         camera = camera.move(vec3(-move_speed, 0, 0));
     }
+    if (glfwGetKey(window, GLFW_KEY_SPACE)) {
+        camera = camera.move(vec3(0, move_speed, 0));
+    } else if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL)) {
+        camera = camera.move(vec3(0, -move_speed, 0));
+    }
     return camera;
 }
 
@@ -536,8 +541,8 @@ GfxDrawBuffers make_fsquad() {
 void main_loop() {
 
     const float clear_z = 1.0f;
-    auto geometries = load_mesh_asset("nff/sphere.nff", aiProcess_GenSmoothNormals); const double move_speed = 0.02;
-    //auto geometries = load_mesh_asset("asset_obj/sponza.obj", (aiPostProcessSteps) 0); const double move_speed = 2;
+    //auto geometries = load_mesh_asset("nff/sphere.nff", aiProcess_GenSmoothNormals); const double move_speed = 0.02;
+    auto geometries = load_mesh_asset("asset_obj/sponza.obj", (aiPostProcessSteps) 0); const double move_speed = 2;
     vector<GeometryBufferData> geometry_buffer_datas = make_buffer_data(geometries);
 
     Degree fov { 60 };
