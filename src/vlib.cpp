@@ -26,9 +26,9 @@ public:
         return x;
     }
 };
-struct GLIndexBufferId: GlId<GLIndexBufferId> {
-};
 struct GLVertexBufferId: GlId<GLVertexBufferId> {
+};
+struct GLIndexBufferId: GlId<GLIndexBufferId> {
 };
 struct GLShaderId: GlId<GLShaderId> {
 };
@@ -39,7 +39,7 @@ struct GLUniformLocationId {
 };
 struct GLFramebufferId: GlId<GLFramebufferId> {
     static GLFramebufferId default_framebuffer() {
-        return GLFramebufferId::make(0);
+        return make(0);
     }
 };
 struct GLTextureId: GlId<GLTextureId> {
@@ -89,7 +89,10 @@ struct GBuffer {
     GfxRenderBuffer depth;
     GfxFramebuffer framebuffer;
 };
-
+struct DirectionalLight {
+    vec3 incident;
+    vec3 color;
+};
 GLRenderBufferId make_renderbuffer(int width, int height) {
     GLuint renderbuffer;
     glGenRenderbuffers(1, &renderbuffer);
@@ -98,7 +101,7 @@ GLRenderBufferId make_renderbuffer(int width, int height) {
 }
 GLTextureId make_texture(int width, int height) {
     GLTextureId texture;
-    glGenTextures(1, &texture.value);
+    glGenTextures(1, texture);
     glTextureImage2DEXT(texture, GL_TEXTURE_2D, 0, GL_RGB, width, height, 0,
     GL_RGB, GL_UNSIGNED_BYTE, 0);
     glTextureParameteriEXT(texture, GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
@@ -107,32 +110,48 @@ GLTextureId make_texture(int width, int height) {
     GL_NEAREST);
     return texture;
 }
+enum UniformTypes {
+    //maybe move to varadic templates later...
+    Matrix4 = 1, Vec3, Sampler
+};
+struct GfxUniformSpec {
+    string name;
+    UniformTypes type;
+    bool operator <(const GfxUniformSpec& rhs) const
+    {
+        //TODO: Why does this not work? seems like some sort of logic error...
+        return (name < rhs.name)
+            ;//|| (type < rhs.type);
+    }
+};
 struct GenGBufferProgram {
     struct Uniforms {
-        static const char* VIEW_PROJ;
+        static const GfxUniformSpec VIEW_PROJ;
     };
     struct Textures {
     };
 };
 struct ShadeGBufferProgram {
     struct Uniforms {
+        static const GfxUniformSpec LIGHT_INCIDENT;
     };
     struct Textures {
-        static const char* ALBEDO;
-        static const char* NORMAL;
+        static const GfxUniformSpec ALBEDO;
+        static const GfxUniformSpec NORMAL;
     };
 };
-const char* GenGBufferProgram::Uniforms::VIEW_PROJ = "view_proj";
-const char* ShadeGBufferProgram::Textures::ALBEDO = "albedo";
-const char* ShadeGBufferProgram::Textures::NORMAL = "normal";
+const GfxUniformSpec GenGBufferProgram::Uniforms::VIEW_PROJ = { "view_proj", UniformTypes::Matrix4 };
+const GfxUniformSpec ShadeGBufferProgram::Textures::ALBEDO = { "in_albedo", UniformTypes::Sampler };
+const GfxUniformSpec ShadeGBufferProgram::Textures::NORMAL = { "in_normal", UniformTypes::Sampler };
+const GfxUniformSpec ShadeGBufferProgram::Uniforms::LIGHT_INCIDENT = { "in_light_incident", UniformTypes::Vec3 };
 
 template<typename TProgram>
 struct GfxProgram {
-    GfxProgram(GLProgramId p_program_id, const map<string, GLUniformLocationId>& p_uniforms) :
-        program_id(p_program_id), uniforms(p_uniforms) {
+    GfxProgram(GLProgramId p_id, const map<GfxUniformSpec, GLUniformLocationId>& p_uniforms) :
+        id(p_id), uniforms(p_uniforms) {
     }
-    GLProgramId program_id;
-    map<string, GLUniformLocationId> uniforms;
+    GLProgramId id;
+    map<GfxUniformSpec, GLUniformLocationId> uniforms;
 };
 struct Degree {
     float value;
@@ -207,8 +226,8 @@ GfxProgram<GenGBufferProgram> load_gen_gbuffer_program() {
     };
     GLProgramId program_id = ogl_create_program(shaders);
     GLUniformLocationId view_proj_loc = {
-        glGetUniformLocation(program_id, GenGBufferProgram::Uniforms::VIEW_PROJ)};
-    map<string, GLUniformLocationId> uniforms = {
+        glGetUniformLocation(program_id, GenGBufferProgram::Uniforms::VIEW_PROJ.name.c_str())};
+    map<GfxUniformSpec, GLUniformLocationId> uniforms = {
         {GenGBufferProgram::Uniforms::VIEW_PROJ, view_proj_loc}
     };
     return GfxProgram<GenGBufferProgram>(program_id, uniforms);
@@ -220,14 +239,17 @@ GfxProgram<ShadeGBufferProgram> load_shade_gbuffer_program() {
     };
     GLProgramId program_id = ogl_create_program(shaders);
 
-    GLUniformLocationId albedo_loc = { glGetUniformLocation(program_id, ShadeGBufferProgram::Textures::ALBEDO)};
-    GLUniformLocationId normal_loc = { glGetUniformLocation(program_id, ShadeGBufferProgram::Textures::NORMAL)};
-
-    map<string, GLUniformLocationId> uniforms = {
+    GLUniformLocationId albedo_loc = { glGetUniformLocation(program_id, ShadeGBufferProgram::Textures::ALBEDO.name.c_str())};
+    GLUniformLocationId normal_loc = { glGetUniformLocation(program_id, ShadeGBufferProgram::Textures::NORMAL.name.c_str())};
+    GLUniformLocationId light_incident_loc = {glGetUniformLocation(program_id, ShadeGBufferProgram::Uniforms::LIGHT_INCIDENT.name.c_str())};
+    map<GfxUniformSpec, GLUniformLocationId> uniforms = {
         {ShadeGBufferProgram::Textures::ALBEDO, albedo_loc},
-        {ShadeGBufferProgram::Textures::NORMAL, normal_loc}
+        {ShadeGBufferProgram::Textures::NORMAL, normal_loc},
+        {ShadeGBufferProgram::Uniforms::LIGHT_INCIDENT, light_incident_loc}
     };
-
+    for(auto kv : uniforms) {
+        printf("%s, %d\n", kv.first.name.c_str(), kv.first.type);
+    }
     return GfxProgram<ShadeGBufferProgram>(program_id, uniforms);
 }
 void error_callback(int error, const char* description) {
@@ -265,9 +287,6 @@ struct GeometryBufferData {
     BufferData<float> positions;
     BufferData<float> normals;
     BufferData<unsigned int> indices;
-    int num_vertices() const {
-        return indices.count();
-    }
 };
 struct Geometry {
     Geometry(const vector<Vertex>& p_verticies, const vector<unsigned int>& p_indices) :
@@ -349,23 +368,75 @@ struct GfxDrawBuffers {
     GLIndexBufferId index_buffer;
     unsigned int num_indices;
 };
-
-template<typename TProgram>
-struct GfxGraphicsState {
-    GfxGraphicsState(const GfxFramebuffer& p_framebuffer, GfxDrawBuffers p_draw_buffers,
-        GfxProgram<TProgram> p_program, const map<string, mat4>& p_uniform_mat4,
-        const map<string, GfxTexture>& p_textures, GfxSampler p_samplers) :
-        framebuffer(p_framebuffer), draw_buffers(p_draw_buffers), program(p_program), uniform_mat4(
-            p_uniform_mat4), textures(p_textures), sampler(p_samplers) {
+size_t size(UniformTypes type) {
+    if(type == Matrix4) {
+        return 4 * 4 * sizeof(float);
+    } else if(type == Vec3) {
+        return 3 * sizeof(float);
+    } else {
+        return -1; //should really throw an error...
     }
-    GfxFramebuffer framebuffer;
-    GfxDrawBuffers draw_buffers;
-    GfxProgram<TProgram> program;
-    map<string, mat4> uniform_mat4;
-    map<string, GfxTexture> textures;
-    GfxSampler sampler;
+}
+
+size_t stride(vec3 _) {
+    return sizeof(float);
+}
+size_t stride(mat4 _) {
+    return sizeof(float);
+}
+size_t byte_size(vec3 _) {
+    return sizeof(float) * 3;
+}
+size_t byte_size(mat4 _) {
+    return sizeof(float) * 4 * 4;
+}
+struct GfxUniformValue {
+    size_t stride;
+    vector<char> buffer;
+    template<typename T>
+    static GfxUniformValue make(const T& v) {
+        char* start = (char*)value_ptr(v);
+        char* end = start + byte_size(v);
+        return { ::stride(v), vector<char>(start, end) };
+    }
 };
 
+template<typename TProgram>
+struct GfxShaderState {
+
+    GfxShaderState(
+        const GfxProgram<TProgram>& p_program,
+        const map<GfxUniformSpec, GfxUniformValue>& p_uniforms,
+        const map<GfxUniformSpec, GfxTexture>& p_textures,
+        const GfxSampler& p_samplers) :
+            program(p_program), uniforms(
+            p_uniforms), textures(p_textures), sampler(p_samplers) { }
+
+    GfxProgram<TProgram> program;
+    map<GfxUniformSpec, GfxUniformValue> uniforms;
+    //TODO: make texture's GfxUniformSpec GfxTextureSpec?
+    map<GfxUniformSpec, GfxTexture> textures;
+    GfxSampler sampler; //default sampler is required for now... just a workaround
+};
+template<typename TProgram>
+struct GfxGraphicsState {
+    GfxGraphicsState(
+        optional<const GfxFramebuffer&> p_framebuffer,
+        optional<const GfxShaderState<TProgram>&> p_shader_state)
+        : framebuffer(p_framebuffer), shader_state(p_shader_state) { }
+
+    optional<GfxFramebuffer> framebuffer;
+    optional<GfxShaderState<TProgram>> shader_state;
+};
+template<typename TProgram>
+struct GfxDrawOperation {
+    GfxDrawOperation(
+        const GfxGraphicsState<TProgram>& p_state,
+        const GfxDrawBuffers& p_draw_buffers) :
+            state(p_state), draw_buffers(p_draw_buffers) { }
+    GfxGraphicsState<TProgram> state;
+    GfxDrawBuffers draw_buffers;
+};
 vector<GfxDrawBuffers> make_draw_buffer_and_upload_data(
     const vector<GeometryBufferData>& geometries) {
     vector<GfxDrawBuffers> result;
@@ -430,9 +501,9 @@ GL_COLOR_ATTACHMENT3,
 GL_COLOR_ATTACHMENT4,
 GL_COLOR_ATTACHMENT5 };
 
-GfxFramebuffer make_frame_buffer(const vector<GfxTexture>& textures, const GfxRenderBuffer depth_buffer) {
+GfxFramebuffer make_frame_buffer(const vector<GfxTexture>& textures, const GfxRenderBuffer& depth_buffer) {
     GLFramebufferId frame_buffer;
-    glGenFramebuffers(1, &frame_buffer.value);
+    glGenFramebuffers(1, frame_buffer);
     for (size_t i = 0; i < textures.size(); i++) {
         glNamedFramebufferTextureEXT(frame_buffer, attachments[i], textures[i].id, 0);
     }
@@ -441,8 +512,6 @@ GfxFramebuffer make_frame_buffer(const vector<GfxTexture>& textures, const GfxRe
 
     glFramebufferDrawBuffersEXT(frame_buffer, textures.size(), attachments);
     assert(GL_FRAMEBUFFER_COMPLETE == glCheckNamedFramebufferStatusEXT(frame_buffer, GL_FRAMEBUFFER));
-
-
 
     return GfxFramebuffer(frame_buffer, textures, depth_buffer);
 }
@@ -456,9 +525,6 @@ GBuffer make_gbuffer(int width, int height) {
 }
 void activate_frame_buffer(GfxFramebuffer frame_buffer) {
     glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer.id);
-}
-void activate_default_frame_buffer() {
-    activate_frame_buffer(GfxFramebuffer::default_fb());
 }
 void activate_and_clear_framebuffer(GfxFramebuffer frame_buffer, float z_reset) {
     activate_frame_buffer(frame_buffer);
@@ -487,40 +553,84 @@ Camera move_camera_using_keyboard(GLFWwindow* window, const Camera& p_camera, do
     }
     return camera;
 }
+template<typename TProgram>
+void apply_uniform(GfxProgram<TProgram> program, GLUniformLocationId uniform_loc,
+    GfxUniformSpec spec, GfxUniformValue val) {
+    auto val_buffer_size = val.buffer.size();
+    assert(size(spec.type) == val_buffer_size);
+    //ext = we dont need to bind program
+    if(spec.type == UniformTypes::Matrix4) {
+        glProgramUniformMatrix4fvEXT(program.id, uniform_loc.id, 1, GL_FALSE, (GLfloat*)val.buffer.data());
+    } else if(spec.type == UniformTypes::Vec3) {
+        glProgramUniform3fvEXT(program.id, uniform_loc.id, 1, (GLfloat*)val.buffer.data());
+    } else {
+        assert(false);
+    }
+}
+template<typename TKey, typename TValue>
+const TValue& get(const map<TKey, TValue>& src, const TKey& key) {
+
+    auto r = src.find(key);
+    if(r == src.end()) {
+        for(auto& kv : src) {
+            printf("%s, %d\n", kv.first.name.c_str(), kv.first.type);
+        }
+        auto r2 = src.find(key);
+        printf("%s", r2);
+        assert(false);
+    }
+    return r->second;
+}
 
 template<typename TProgram>
-void draw(const GfxGraphicsState<TProgram>& state) {
-    activate_frame_buffer(state.framebuffer);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, state.draw_buffers.index_buffer);
-    glEnableVertexAttribArray(0);
-    glEnableVertexAttribArray(1);
-    glBindBuffer(GL_ARRAY_BUFFER, state.draw_buffers.position_buffer);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
-    glBindBuffer(GL_ARRAY_BUFFER, state.draw_buffers.normal_buffer);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, 0);
-    glUseProgram(state.program.program_id);
-    for (auto mat4_uniform : state.uniform_mat4) {
-        auto key = state.program.uniforms.find(mat4_uniform.first)->second;
-        auto value = mat4_uniform.second;
-        glProgramUniformMatrix4fv(state.program.program_id, key.id, 1, GL_FALSE, value_ptr(value));
+void apply_state(const GfxGraphicsState<TProgram>& state) {
+    if(state.framebuffer) {
+        activate_frame_buffer(*state.framebuffer);
     }
-    {
-        int texture_idx = 0;
-        for (auto it = begin(state.textures); it != end(state.textures); it++, texture_idx++) {
-            GLUniformLocationId loc = state.program.uniforms.find(it->first)->second;
-            glUniform1i(loc.id, texture_idx);
-            glActiveTexture(GL_TEXTURE0 + texture_idx);
-            GfxTexture tex = it->second;
-            glBindTexture(GL_TEXTURE_2D, tex.id);
-            glBindSampler(0, state.sampler.id);
+    if(state.shader_state) {
+        auto& shader_state = *state.shader_state;
+        glUseProgram(shader_state.program.id);
+        for (auto uniform : shader_state.uniforms) {
+            auto uniform_spec = uniform.first;
+            auto uniform_value = uniform.second;
+            auto uniform_loc = get(shader_state.program.uniforms, uniform_spec);
+            apply_uniform(shader_state.program, uniform_loc, uniform_spec, uniform_value);
+        }
+        {
+            int texture_idx = 0;
+            for (auto it = begin(shader_state.textures); it != end(shader_state.textures); it++, texture_idx++) {
+                //auto tex_name = it->first;
+                //auto tex_val = it->second;
+                //the following code may not work...
+                GLUniformLocationId loc = (shader_state.program.uniforms.find(it->first))->second;
+                glUniform1i(loc.id, texture_idx);
+                glActiveTexture(GL_TEXTURE0 + texture_idx);
+                GfxTexture tex = it->second;
+                glBindTexture(GL_TEXTURE_2D, tex.id);
+                glBindSampler(0, shader_state.sampler.id);
+            }
         }
     }
-    glDrawElements(GL_TRIANGLES, state.draw_buffers.num_indices,
-    GL_UNSIGNED_INT, 0);
+}
+
+template<typename TProgram>
+void draw(const GfxDrawOperation<TProgram>& drawop) {
+    apply_state(drawop.state);
+
+    auto& draw_buffers = drawop.draw_buffers;
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, draw_buffers.index_buffer);
+    glEnableVertexAttribArray(0);
+    glEnableVertexAttribArray(1);
+    glBindBuffer(GL_ARRAY_BUFFER, draw_buffers.position_buffer);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
+    glBindBuffer(GL_ARRAY_BUFFER, draw_buffers.normal_buffer);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, 0);
+
+    glDrawElements(GL_TRIANGLES, draw_buffers.num_indices, GL_UNSIGNED_INT, 0);
 }
 GfxSampler make_sampler() {
     GLSamplerId sampler_id;
-    glGenSamplers(1, &sampler_id.value);
+    glGenSamplers(1, sampler_id);
     glSamplerParameteri(sampler_id, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glSamplerParameteri(sampler_id, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glSamplerParameteri(sampler_id, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -538,6 +648,44 @@ GfxDrawBuffers make_fsquad() {
 
     return make_draw_buffer_and_upload_data(geom_buffer_data)[0];
 }
+struct ShadeGBufferResources {
+    ShadeGBufferResources(const GfxSampler& p_sampler,
+        const GfxDrawBuffers& p_fsquad,
+        const GfxProgram<ShadeGBufferProgram>& p_shade_gbuffer_program)
+        : sampler(p_sampler), fsquad(p_fsquad), shade_gbuffer_program(p_shade_gbuffer_program) { }
+    GfxSampler sampler;
+    GfxDrawBuffers fsquad;
+    GfxProgram<ShadeGBufferProgram> shade_gbuffer_program;
+};
+ShadeGBufferResources make_shade_gbuffer_resources() {
+    return ShadeGBufferResources (make_sampler(), make_fsquad(), load_shade_gbuffer_program());
+}
+GfxDrawOperation<ShadeGBufferProgram> make_shade_gbuffer_state(
+    const GBuffer& gbuffer,
+    const ShadeGBufferResources& shade_gbuffer_resources,
+    const vector<DirectionalLight>& lights) {
+    assert(lights.size() == 1); //not supported otherwise
+    auto light_incident_uniform_value = GfxUniformValue::make(lights[0].incident);
+    GfxShaderState<ShadeGBufferProgram> shader_state(
+        shade_gbuffer_resources.shade_gbuffer_program,
+        {
+            { ShadeGBufferProgram::Uniforms::LIGHT_INCIDENT, light_incident_uniform_value}
+        },
+        {
+            { ShadeGBufferProgram::Textures::ALBEDO, gbuffer.albedo },
+            { ShadeGBufferProgram::Textures::NORMAL, gbuffer.normal }
+        }, shade_gbuffer_resources.sampler);
+    GfxGraphicsState<ShadeGBufferProgram> gfx_state(GfxFramebuffer::default_fb(), shader_state);
+    return GfxDrawOperation<ShadeGBufferProgram>(gfx_state, shade_gbuffer_resources.fsquad);
+}
+
+template<typename TProgram>
+void validate_program(const GfxProgram<TProgram>& prog) {
+    for (auto& kv : prog.uniforms) {
+        assert(kv.second.id != -1);
+    }
+}
+
 void main_loop() {
 
     const float clear_z = 1.0f;
@@ -563,16 +711,17 @@ void main_loop() {
 
     auto draw_buffers = make_draw_buffer_and_upload_data(geometry_buffer_datas);
 
-    vector<GLShaderId> shaders = { create_shader(GL_VERTEX_SHADER, read_all("shaders/gen_gbuffer.vs")),
-        create_shader(GL_FRAGMENT_SHADER, read_all("shaders/gen_gbuffer.fs")) };
     auto gbuffer = make_gbuffer(width, height);
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LESS);
     auto gen_gbuffer_program = load_gen_gbuffer_program();
-    auto shade_gbuffer_program = load_shade_gbuffer_program();
+    validate_program(gen_gbuffer_program);
     int frame_idx = 0;
-    GfxSampler sampler = make_sampler();
-    auto fsquad = make_fsquad();
+
+    auto shade_gbuffer_resources = make_shade_gbuffer_resources();
+    validate_program(shade_gbuffer_resources.shade_gbuffer_program);
+    DirectionalLight light0 = { normalize(vec3(-1, -1, 0)), vec3(1,0,0) };
+
     while (!glfwWindowShouldClose(window)) {
         glClearDepth(1);
         glClear(GL_DEPTH_BUFFER_BIT);
@@ -582,22 +731,18 @@ void main_loop() {
         activate_and_clear_framebuffer(gbuffer.framebuffer, clear_z);
 
         for (auto& draw_buffer : draw_buffers) {
-            map<string, mat4> uniform_values = { { GenGBufferProgram::Uniforms::VIEW_PROJ,
-                camera.projection_matrix() * camera.view_matrix() } };
-
-            GfxGraphicsState<GenGBufferProgram> state(gbuffer.framebuffer, draw_buffer, gen_gbuffer_program,
-                uniform_values, { }, sampler);
-            draw(state);
+            map<GfxUniformSpec, GfxUniformValue> uniform_values = { { GenGBufferProgram::Uniforms::VIEW_PROJ,
+                GfxUniformValue::make(camera.projection_matrix() * camera.view_matrix()) } };
+            GfxShaderState<GenGBufferProgram> shader_state(gen_gbuffer_program,
+                uniform_values, { }, shade_gbuffer_resources.sampler);
+            GfxGraphicsState<GenGBufferProgram> state(gbuffer.framebuffer, shader_state);
+            GfxDrawOperation<GenGBufferProgram> drawop(state, draw_buffer);
+            draw(drawop);
         }
 
-        GfxGraphicsState<ShadeGBufferProgram> shade_gbuffer_State(
-            GfxFramebuffer::default_fb(), fsquad, shade_gbuffer_program,
-            { },
-            {
-                { ShadeGBufferProgram::Textures::ALBEDO, gbuffer.albedo },
-                { ShadeGBufferProgram::Textures::NORMAL, gbuffer.normal }
-            }, sampler);
-        draw(shade_gbuffer_State);
+        auto shade_gbuffer_state = make_shade_gbuffer_state(gbuffer, shade_gbuffer_resources,
+            { light0 });
+        draw(shade_gbuffer_state);
 
         glfwSwapBuffers(window);
         glfwPollEvents();
